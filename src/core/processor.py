@@ -1,54 +1,97 @@
 import pandas as pd
 import numpy as np
+import os
+import threading
+import time
 from haversine import haversine, Unit
 from distfit import distfit
 from numpy.random import binomial
 
+# ---------------------------------------------------------
+# Declaração de constantes
+# ---------------------------------------------------------
+FILE_BUS_STOPS = "bus_stops.csv"
+FILE_VEHICLES = "vehicles.csv"
+FILE_ETL_ITINERARY = "etl_itinerary.csv"
+FILE_ETL_EVENT = "etl_event.csv"
+
 class Processor:
 
-    def __init__(self, bus_stops, vehicles):
-        self.vehicles = vehicles
-        self.bus_stops = bus_stops
+    def __init__(self, bus_stops, vehicles, base_date):
+        
+        self.base_date = base_date
+        self._lock = threading.Lock()
 
         # ---------------------------------------------------------
-        # Limpar bus stops
+        # Recuperar os data frames iniciais (caso existam)
         # ---------------------------------------------------------
-        self.bus_stops['latitude'] = pd.to_numeric(self.bus_stops['latitude'])
-        self.bus_stops['longitude'] = pd.to_numeric(self.bus_stops['longitude'])
-        self.bus_stops['seq'] = pd.to_numeric(self.bus_stops['seq'])
-        self.bus_stops.sort_values(by = ["line_code", "itinerary_id", "seq"], inplace = True)
-        self.bus_stops = self.bus_stops[{"itinerary_id", "line_code", "latitude", "longitude", "name", "number", "line_way", "type"}].drop_duplicates()
-        self.bus_stops["name_norm"] = self.bus_stops["name"].str.replace("Rua", "R.", regex = False)
-        self.bus_stops["name_norm"] = self.bus_stops["name_norm"].str.extract("([\w\s.,\d]+)").apply(lambda x: x.str.strip())
-        self.bus_stops["name_norm"] = self.bus_stops["name_norm"].str.normalize("NFKD").str.encode("ascii", errors = "ignore").str.decode("utf-8")
-        self.bus_stops["id"] = self.bus_stops["name_norm"].astype('category').cat.codes
-        self.bus_stops["next_stop_id"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["id"].shift(-1), None)
-        self.bus_stops["next_stop_name_norm"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["name_norm"].shift(-1), None)
-        self.bus_stops["next_stop_latitude"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["latitude"].shift(-1), np.nan)
-        self.bus_stops["next_stop_longitude"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["longitude"].shift(-1), np.nan)
-        self.bus_stops["next_stop_delta_s"] = self.bus_stops.apply(lambda row: haversine((row["latitude"], row["longitude"]), (row["next_stop_latitude"], row["next_stop_longitude"]), unit = Unit.METERS), axis = 1)
-        self.bus_stops = self.bus_stops.query("id != next_stop_id")
-        self.bus_stops["seq"] = self.bus_stops.groupby(["itinerary_id", "line_code"]).cumcount()
-        self.bus_stops["max_seq"] = self.bus_stops.groupby(["itinerary_id", "line_code"])["seq"].transform(max)
+        
+        if (os.path.exists(FILE_BUS_STOPS) and os.path.exists(FILE_VEHICLES)):
+            self.bus_stops = pd.read_csv(FILE_BUS_STOPS, dtype = {"line_code": np.str})
+            self.vehicles = pd.read_csv(FILE_VEHICLES, dtype = {"line_code": np.str}, parse_dates = ["event_timestamp", "last_eventtimestamp"])
+        else:
+            self.vehicles = vehicles
+            self.bus_stops = bus_stops
 
-        # ---------------------------------------------------------
-        # Calcular a velocidade média dos ônibus
-        # ---------------------------------------------------------
-        self.vehicles["event_timestamp"] = pd.to_datetime(self.vehicles["event_timestamp"])
-        self.vehicles.sort_values(by = ["line_code", "vehicle", "event_timestamp"], inplace = True)
-        self.vehicles["last_eventtimestamp"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["event_timestamp"].shift(1), np.datetime64('NaT'))
-        self.vehicles["last_latitude"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["latitude"].shift(1), np.nan)
-        self.vehicles["last_longitude"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["longitude"].shift(1), np.nan)
-        self.vehicles["delta_t"] = (self.vehicles["event_timestamp"] - self.vehicles["last_eventtimestamp"]).astype('timedelta64[s]')
-        self.vehicles["delta_s"] = self.vehicles.apply(lambda row: haversine((row["latitude"], row["longitude"]), (row["last_latitude"], row["last_longitude"]), unit = Unit.METERS), axis = 1)
-        self.vehicles["speed"] = 3.6 * (self.vehicles["delta_s"] / self.vehicles["delta_t"])
-        self.vehicles = self.vehicles.query("delta_t <= 120 and speed >= 0 and speed <= 62.54")
-        group = self.vehicles.groupby(by = ["line_code", "vehicle"])
-        speed_windowed = group.rolling(window = "10s", min_periods = 1, on = "event_timestamp", closed = "both").agg({"speed": "mean"})
-        self.vehicles.set_index(["line_code", "vehicle", "event_timestamp"], inplace = True)
-        self.vehicles["speed_windowed"] = speed_windowed["speed"]
-        self.vehicles["status"] = np.where(self.vehicles["speed_windowed"] <= 12.5, "STOPPED", "MOVING")
-        self.vehicles.reset_index(inplace = True)
+            # ---------------------------------------------------------
+            # Limpar bus stops
+            # ---------------------------------------------------------
+            self.bus_stops['latitude'] = pd.to_numeric(self.bus_stops['latitude'])
+            self.bus_stops['longitude'] = pd.to_numeric(self.bus_stops['longitude'])
+            self.bus_stops['seq'] = pd.to_numeric(self.bus_stops['seq'])
+            self.bus_stops.sort_values(by = ["line_code", "itinerary_id", "seq"], inplace = True)
+            self.bus_stops = self.bus_stops[{"itinerary_id", "line_code", "latitude", "longitude", "name", "number", "line_way", "type"}].drop_duplicates()
+            self.bus_stops["name_norm"] = self.bus_stops["name"].str.replace("Rua", "R.", regex = False)
+            self.bus_stops["name_norm"] = self.bus_stops["name_norm"].str.extract("([\w\s.,\d]+)").apply(lambda x: x.str.strip())
+            self.bus_stops["name_norm"] = self.bus_stops["name_norm"].str.normalize("NFKD").str.encode("ascii", errors = "ignore").str.decode("utf-8")
+            self.bus_stops["id"] = self.bus_stops["name_norm"].astype('category').cat.codes
+            self.bus_stops["next_stop_id"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["id"].shift(-1), None)
+            self.bus_stops["next_stop_id"] = self.bus_stops["next_stop_id"].astype('Int64')
+            self.bus_stops["next_stop_name_norm"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["name_norm"].shift(-1), None)
+            self.bus_stops["next_stop_latitude"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["latitude"].shift(-1), np.nan)
+            self.bus_stops["next_stop_longitude"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["longitude"].shift(-1), np.nan)
+            self.bus_stops["next_stop_delta_s"] = self.bus_stops.apply(lambda row: haversine((row["latitude"], row["longitude"]), (row["next_stop_latitude"], row["next_stop_longitude"]), unit = Unit.METERS), axis = 1)
+            self.bus_stops = self.bus_stops.query("id != next_stop_id")
+            self.bus_stops["seq"] = self.bus_stops.groupby(["itinerary_id", "line_code"]).cumcount()
+            self.bus_stops["max_seq"] = self.bus_stops.groupby(["itinerary_id", "line_code"])["seq"].transform(max)
+
+            # ---------------------------------------------------------
+            # Calcular a velocidade média dos ônibus
+            # ---------------------------------------------------------
+            self.vehicles["event_timestamp"] = pd.to_datetime(self.vehicles["event_timestamp"])
+            self.vehicles.sort_values(by = ["line_code", "vehicle", "event_timestamp"], inplace = True)
+            self.vehicles["last_eventtimestamp"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["event_timestamp"].shift(1), np.datetime64('NaT'))
+            self.vehicles["last_latitude"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["latitude"].shift(1), np.nan)
+            self.vehicles["last_longitude"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["longitude"].shift(1), np.nan)
+            self.vehicles["delta_t"] = (self.vehicles["event_timestamp"] - self.vehicles["last_eventtimestamp"]).astype('timedelta64[s]')
+            self.vehicles["delta_s"] = self.vehicles.apply(lambda row: haversine((row["latitude"], row["longitude"]), (row["last_latitude"], row["last_longitude"]), unit = Unit.METERS), axis = 1)
+            self.vehicles["speed"] = 3.6 * (self.vehicles["delta_s"] / self.vehicles["delta_t"])
+            self.vehicles = self.vehicles.query("delta_t <= 120 and speed >= 0 and speed <= 62.54")
+            group = self.vehicles.groupby(by = ["line_code", "vehicle"])
+            speed_windowed = group.rolling(window = "10s", min_periods = 1, on = "event_timestamp", closed = "both").agg({"speed": "mean"})
+            self.vehicles.set_index(["line_code", "vehicle", "event_timestamp"], inplace = True)
+            self.vehicles["speed_windowed"] = speed_windowed["speed"]
+            self.vehicles["status"] = np.where(self.vehicles["speed_windowed"] <= 12.5, "STOPPED", "MOVING")
+            self.vehicles.reset_index(inplace = True)
+
+            # ---------------------------------------------------------
+            # Gravar os data frames iniciais
+            # ---------------------------------------------------------
+            self.bus_stops.to_csv(FILE_BUS_STOPS, index = False)
+            self.vehicles.to_csv(FILE_VEHICLES, index = False)
+
+            # ---------------------------------------------------------
+            # Remover arquivos de saída se existirem
+            # ---------------------------------------------------------
+            if os.path.exists(FILE_ETL_ITINERARY):
+                os.remove(FILE_ETL_ITINERARY)
+            if os.path.exists(FILE_ETL_EVENT):    
+                os.remove(FILE_ETL_EVENT)
+
+            # ---------------------------------------------------------
+            # Selecionar campos utilizados no ETL e exportar
+            # ---------------------------------------------------------         
+            self.bus_stops.to_csv(FILE_ETL_ITINERARY, header = True, columns = ["line_code", "id", "name", "name_norm", "latitude", "longitude", "type", "itinerary_id", "line_way", "next_stop_id", "next_stop_delta_s", "seq"], index = False)
 
     # ---------------------------------------------------------
     # Encontrar a PDF que melhor se ajusta a velocidade
@@ -162,9 +205,33 @@ class Processor:
         return events
 
     # ---------------------------------------------------------
+    # Processar todas as linhas
+    # ---------------------------------------------------------
+    def process_all_lines(self, n_threads):
+        self.linhas = self.bus_stops["line_code"].drop_duplicates()
+        linhas_processadas = []
+        if os.path.exists(FILE_ETL_EVENT):
+            events = pd.read_csv(FILE_ETL_EVENT, header = 0, names = ["line_code", "vehicle", "id", "status", "itinerary_id", "event_timestamp"], dtype = {"line_code": np.str})
+            linhas_processadas = events["line_code"].astype(str).drop_duplicates().tolist()
+        linhas_nao_processadas = list(set(self.linhas) - set(linhas_processadas))
+        self.c = len(linhas_processadas)
+        while len(linhas_nao_processadas):
+            if (threading.active_count() <= n_threads):
+                threading.Thread(
+                    target = self.process_line,
+                    args = (linhas_nao_processadas.pop(),)
+                ).start()
+            time.sleep(1)           
+
+        #os.remove(FILE_BUS_STOPS)
+        #os.remove(FILE_VEHICLES)
+
+    # ---------------------------------------------------------
     # Processar uma linha individualmente
     # ---------------------------------------------------------
     def process_line(self, linha):
+        
+        print("Processando linha '{0}'...".format(linha))
 
         # -----------------------------------------------------------------------------------------
         # Cruzar a posição do ônibus com a localização dos pontos de ônibus e calcular a distância
@@ -263,5 +330,10 @@ class Processor:
         events["generated"] = False
         events = self.recover_data(1, 100, events)
 
-        events.sort_values(by = ["line_code", "vehicle", "event_timestamp"]).to_csv("out.csv")
-        self.bus_stops.to_csv("bus_stops.csv")
+        # ---------------------------------------------------------
+        # Selecionar campos utilizados no ETL e exportar
+        # ---------------------------------------------------------        
+        with self._lock:
+            events.to_csv(FILE_ETL_EVENT, header = False, columns = ["line_code", "vehicle", "id", "status", "itinerary_id", "event_timestamp"], index = False, mode = "a")            
+            self.c = self.c + 1
+            print("Linha '{0}' processada com sucesso! [{1} de {2} ({3:.2f}%)]".format(linha, self.c, len(self.linhas), 100 * self.c / len(self.linhas)))
