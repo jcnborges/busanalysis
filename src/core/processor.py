@@ -129,7 +129,10 @@ class Processor:
             return np.nan
         a = a.groupby(by = ["line_code", "vehicle", "status"]).agg({"id": "count"}).reset_index()
         a["%"] = a["id"] / a.groupby(by = ["line_code", "vehicle"])["id"].transform("sum")
-        return a.query("status == 'STOPPED'")["%"].iloc[0]
+        a = a.query("status == 'STOPPED'")["%"]
+        if (a.empty):
+            return 0
+        return a.iloc[0]
 
     # ---------------------------------------------------------
     # Estimar o intervalo de tempo para a próxima parada
@@ -139,7 +142,11 @@ class Processor:
             b = 1
         else:
             b = binomial(1, apriori_bus_stop)
-        return 3.6 * next_stop_delta_s / speed_pdf.generate(1)[0] + b * waiting_time_pdf.generate(1)[0]
+        while True:
+            try:
+                return pd.to_timedelta(3.6 * next_stop_delta_s / speed_pdf.generate(1)[0] + b * waiting_time_pdf.generate(1)[0], unit = 's')
+            except Exception as e:
+                print(traceback.format_exc())        
 
     # ---------------------------------------------------------
     # Procurar o itinerário do ônibus (sentido da rota)
@@ -170,7 +177,10 @@ class Processor:
     # Passar filtro de itinerario para atenuar ruído
     # ---------------------------------------------------------
     def filter_itinerary(self, line_code, vehicle, actual_value, threshold, itinerary_probability):
-        a = itinerary_probability.query("line_code == @line_code and vehicle == @vehicle").sort_values("%", ascending = False).iloc[0]
+        a = itinerary_probability.query("line_code == @line_code and vehicle == @vehicle")
+        if (a.empty):
+            return actual_value
+        a = a.sort_values("%", ascending = False).iloc[0]
         if (a["%"] >= threshold):
             return a["itinerary_id"]
         else:
@@ -201,7 +211,7 @@ class Processor:
             aux["last_eventtimestamp"] = aux["event_timestamp"]
             aux["status"] = np.where(binomial(1, aux["apriori_bus_stop"]) == 1, "STOPPED", "MOVING")
             aux["estimated_next_delta_t"] = aux.apply(lambda row: self.estimate_next_delta_t(row["next_stop_delta_s"], row["speed_pdf"], row["waiting_time_pdf"], row["apriori_bus_stop"], row["status"]), axis = 1)
-            aux["event_timestamp"] = aux["last_eventtimestamp"] + pd.to_timedelta(aux["estimated_next_delta_t"], unit = 's')
+            aux["event_timestamp"] = aux["last_eventtimestamp"] + aux["estimated_next_delta_t"]
             aux["last_id"] = aux["id"]
             aux["id"] = aux["next_stop_id"]
             aux["generated"] = True
@@ -254,6 +264,14 @@ class Processor:
             # -----------------------------------------------------------------------------------------
             dim_bus_stops = self.bus_stops.groupby(by = ["id", "name_norm"]).agg({"latitude": "mean", "longitude": "mean"}).reset_index()
             aux = self.vehicles.query("line_code == @linha")
+
+            if (aux.empty):
+                print("Não há logs de veículos... Encerrando o processamento da linha!")
+                with self._lock:
+                    self.c = self.c + 1
+                    print("Linha '{0}' processada com sucesso! [{1} de {2} ({3:.2f}%)]".format(linha, self.c, len(self.linhas), 100 * self.c / len(self.linhas)))
+                    return
+
             aux["id"] = aux.apply(lambda row: self.search_bus_stop(row["line_code"], row["latitude"], row["longitude"]), axis = 1)
             aux = pd.merge(aux, dim_bus_stops, on = ["id"])
             aux["distance"] = aux.apply(lambda row: haversine((row["latitude_x"], row["longitude_x"]), (row["latitude_y"], row["longitude_y"]), unit = Unit.METERS), axis = 1)
@@ -344,11 +362,15 @@ class Processor:
             events.query("id != last_id", inplace = True)
             events = pd.merge(events, self.bus_stops[{"line_code", "id", "itinerary_id", "seq", "next_stop_id", "next_stop_delta_s"}], on = ["line_code", "id", "itinerary_id"], how = "left")
 
+            if (events.empty):
+                print("Não há logs válidos de veículos. Encerrando o processamento da linha!")
+                return
+
             # ---------------------------------------------------------
             # Estimar o timestamp da próxima parada
             # ---------------------------------------------------------
             events["estimated_next_delta_t"] = events.apply(lambda row: self.estimate_next_delta_t(row["next_stop_delta_s"], row["speed_pdf"], row["waiting_time_pdf"], row["apriori_bus_stop"]), axis = 1)
-            events["estimated_next_eventtimestamp"] = events["event_timestamp"] + pd.to_timedelta(events["estimated_next_delta_t"], unit = 's')
+            events["estimated_next_eventtimestamp"] = events["event_timestamp"] + events["estimated_next_delta_t"]
 
             events["generated"] = False
             events = self.recover_data(1, 100, events)
@@ -357,7 +379,7 @@ class Processor:
             # ---------------------------
             # Decomentar para testes
             # ---------------------------
-            #events.to_csv("events_finished.csv")         
+            # events.to_csv("events_finished.csv")         
 
             # ---------------------------------------------------------
             # Selecionar campos utilizados no ETL e exportar
