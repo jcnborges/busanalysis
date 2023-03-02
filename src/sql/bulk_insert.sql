@@ -6,8 +6,7 @@ LOAD DATA INFILE '/var/lib/mysql-files/etl_event.csv'
 INTO TABLE etl_event
 FIELDS TERMINATED BY ','
 ENCLOSED BY '"'
-LINES TERMINATED BY '\n'
-IGNORE 1 ROWS;
+LINES TERMINATED BY '\n';
 
 TRUNCATE TABLE etl_itinerary;
 
