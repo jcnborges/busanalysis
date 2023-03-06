@@ -54,7 +54,7 @@ class Processor:
             self.bus_stops["next_stop_latitude"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["latitude"].shift(-1), np.nan)
             self.bus_stops["next_stop_longitude"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["longitude"].shift(-1), np.nan)
             self.bus_stops["next_stop_delta_s"] = self.bus_stops.apply(lambda row: haversine((row["latitude"], row["longitude"]), (row["next_stop_latitude"], row["next_stop_longitude"]), unit = Unit.METERS), axis = 1)
-            self.bus_stops = self.bus_stops.query("id != next_stop_id")
+            self.bus_stops = self.bus_stops.query("id != next_stop_id or next_stop_id.isnull()")
             self.bus_stops["seq"] = self.bus_stops.groupby(["itinerary_id", "line_code"]).cumcount()
             self.bus_stops["max_seq"] = self.bus_stops.groupby(["itinerary_id", "line_code"])["seq"].transform(max)
 
@@ -360,7 +360,7 @@ class Processor:
                 # ---------------------------------------------------------
                 events = events.sort_values(by = ["line_code", "vehicle", "event_timestamp"])
                 events["last_eventtimestamp"] = np.where((events["line_code"] == events["line_code"].shift(1)) & (events["vehicle"] == events["vehicle"].shift(1)), events["event_timestamp"].shift(1), np.datetime64('NaT'))
-                events["last_id"] = np.where((events["line_code"] == events["line_code"].shift(1)) & (events["vehicle"] == events["vehicle"].shift(1)), events["id"].shift(1), np.nan)
+                events["last_id"] = np.where((events["line_code"] == events["line_code"].shift(1)) & (events["vehicle"] == events["vehicle"].shift(1)), events["id"].shift(1), np.nan)                
                 #events["last_name_norm"] = np.where((events["line_code"] == events["line_code"].shift(1)) & (events["vehicle"] == events["vehicle"].shift(1)), events["name_norm"].shift(1), np.nan)
                 events.query("id != last_id", inplace = True)
                 events = pd.merge(events, self.bus_stops[{"line_code", "id", "itinerary_id", "seq", "next_stop_id", "next_stop_delta_s"}], on = ["line_code", "id", "itinerary_id"], how = "left")
@@ -377,18 +377,20 @@ class Processor:
 
                 events["generated"] = False
                 events = self.recover_data(1, 100, events)
-                events.query("seq < next_stop_seq", inplace = True)
+                events["last_stop_seq"] = np.where((events["line_code"] == events["line_code"].shift(1)) & (events["vehicle"] == events["vehicle"].shift(1)), events["seq"].shift(1), np.nan)
+                #events.query("seq < next_stop_seq", inplace = True)
+                events.query("seq == last_stop_seq + 1 or next_stop_seq == seq + 1 or seq == 0", inplace = True)
                 
                 # ---------------------------
                 # Decomentar para testes
                 # ---------------------------
-                # events.to_csv("events_finished.csv")         
+                events.to_csv("csv/events_finished_{0}.csv".format(linha))         
 
                 # ---------------------------------------------------------
                 # Selecionar campos utilizados no ETL e exportar
                 # ---------------------------------------------------------        
                 with self._lock:
-                    events.to_csv(FILE_ETL_EVENT, header = False, columns = ["line_code", "vehicle", "id", "status", "itinerary_id", "event_timestamp", "seq"], index = False, mode = "a")            
+                    events.to_csv(FILE_ETL_EVENT, header = False, columns = ["line_code", "vehicle", "id", "status", "itinerary_id", "event_timestamp", "seq"], index = False, mode = "a")
                     self.c = self.c + 1
                     print("Linha '{0}' processada com sucesso! [{1} de {2} ({3:.2f}%)]".format(linha, self.c, len(self.linhas), 100 * self.c / len(self.linhas)))                
                 success = True
