@@ -31,7 +31,7 @@ class Processor:
         
         if (os.path.exists(FILE_BUS_STOPS) and os.path.exists(FILE_VEHICLES)):
             self.bus_stops = pd.read_csv(FILE_BUS_STOPS, dtype = {"line_code": np.str})
-            self.vehicles = pd.read_csv(FILE_VEHICLES, dtype = {"line_code": np.str}, parse_dates = ["event_timestamp", "last_eventtimestamp"])
+            self.vehicles = pd.read_csv(FILE_VEHICLES, dtype = {"line_code": np.str}, parse_dates = ["event_timestamp"])
         else:
             self.vehicles = vehicles
             self.bus_stops = bus_stops
@@ -63,19 +63,19 @@ class Processor:
             # ---------------------------------------------------------
             self.vehicles["event_timestamp"] = pd.to_datetime(self.vehicles["event_timestamp"])
             self.vehicles.sort_values(by = ["line_code", "vehicle", "event_timestamp"], inplace = True)
-            self.vehicles["last_eventtimestamp"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["event_timestamp"].shift(1), np.datetime64('NaT'))
-            self.vehicles["last_latitude"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["latitude"].shift(1), np.nan)
-            self.vehicles["last_longitude"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["longitude"].shift(1), np.nan)
-            self.vehicles["delta_t"] = (self.vehicles["event_timestamp"] - self.vehicles["last_eventtimestamp"]).astype('timedelta64[s]')
-            self.vehicles["delta_s"] = self.vehicles.apply(lambda row: haversine((row["latitude"], row["longitude"]), (row["last_latitude"], row["last_longitude"]), unit = Unit.METERS), axis = 1)
-            self.vehicles["speed"] = 3.6 * (self.vehicles["delta_s"] / self.vehicles["delta_t"])
-            self.vehicles = self.vehicles.query("delta_t <= 120 and speed >= 0 and speed <= 62.54")
-            group = self.vehicles.groupby(by = ["line_code", "vehicle"])
-            speed_windowed = group.rolling(window = "10s", min_periods = 1, on = "event_timestamp", closed = "both").agg({"speed": "mean"})
-            self.vehicles.set_index(["line_code", "vehicle", "event_timestamp"], inplace = True)
-            self.vehicles["speed_windowed"] = speed_windowed["speed"]
-            self.vehicles["status"] = np.where(self.vehicles["speed_windowed"] <= 12.5, "STOPPED", "MOVING")
-            self.vehicles.reset_index(inplace = True)
+            #self.vehicles["last_eventtimestamp"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["event_timestamp"].shift(1), np.datetime64('NaT'))
+            #self.vehicles["last_latitude"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["latitude"].shift(1), np.nan)
+            #self.vehicles["last_longitude"] = np.where((self.vehicles["line_code"] == self.vehicles["line_code"].shift(1)) & (self.vehicles["vehicle"] == self.vehicles["vehicle"].shift(1)), self.vehicles["longitude"].shift(1), np.nan)
+            #self.vehicles["delta_t"] = (self.vehicles["event_timestamp"] - self.vehicles["last_eventtimestamp"]).astype('timedelta64[s]')
+            #self.vehicles["delta_s"] = self.vehicles.apply(lambda row: haversine((row["latitude"], row["longitude"]), (row["last_latitude"], row["last_longitude"]), unit = Unit.METERS), axis = 1)
+            #self.vehicles["speed"] = 3.6 * (self.vehicles["delta_s"] / self.vehicles["delta_t"])
+            #self.vehicles = self.vehicles.query("delta_t <= 120 and speed >= 0 and speed <= 62.54")
+            #group = self.vehicles.groupby(by = ["line_code", "vehicle"])
+            #speed_windowed = group.rolling(window = "10s", min_periods = 1, on = "event_timestamp", closed = "both").agg({"speed": "mean"})
+            #self.vehicles.set_index(["line_code", "vehicle", "event_timestamp"], inplace = True)
+            #self.vehicles["speed_windowed"] = speed_windowed["speed"]
+            #self.vehicles["status"] = np.where(self.vehicles["speed_windowed"] <= 12.5, "STOPPED", "MOVING")
+            #self.vehicles.reset_index(inplace = True)
 
             # ---------------------------------------------------------
             # Gravar os data frames iniciais
@@ -99,54 +99,54 @@ class Processor:
     # ---------------------------------------------------------
     # Encontrar a PDF que melhor se ajusta a velocidade
     # ---------------------------------------------------------
-    def fit_speed_pdf(self, line_code, vehicle):
-        a = self.vehicles.query("status == 'MOVING' and line_code == @line_code and vehicle == @vehicle")["speed"]
-        a = a[np.isfinite(a)]
-        if a.empty:
-            return np.nan
-        dist = distfit()
-        dist.fit_transform(a)
-        return dist
+    #def fit_speed_pdf(self, line_code, vehicle):
+    #    a = self.vehicles.query("status == 'MOVING' and line_code == @line_code and vehicle == @vehicle")["speed"]
+    #    a = a[np.isfinite(a)]
+    #    if a.empty:
+    #        return np.nan
+    #    dist = distfit()
+    #    dist.fit_transform(a)
+    #    return dist
 
     # ---------------------------------------------------------
     # Encontrar a PDF que melhor se ajusta ao tempo de espera
     # ---------------------------------------------------------
-    def fit_waiting_time_pdf(self, line_code, vehicle, waiting_time):
-        a = waiting_time.query("last_status == 'MOVING' and status == 'STOPPED' and next_status == 'MOVING' and id == last_id and id == next_id and delta_t and line_code == @line_code and vehicle == @vehicle")["delta_t"]
-        a = a[np.isfinite(a)]
-        if a.empty:
-            return np.nan    
-        dist = distfit()
-        dist.fit_transform(a)
-        return dist
+    #def fit_waiting_time_pdf(self, line_code, vehicle, waiting_time):
+    #    a = waiting_time.query("last_status == 'MOVING' and status == 'STOPPED' and next_status == 'MOVING' and id == last_id and id == next_id and delta_t and line_code == @line_code and vehicle == @vehicle")["delta_t"]
+    #    a = a[np.isfinite(a)]
+    #    if a.empty:
+    #        return np.nan    
+    #    dist = distfit()
+    #    dist.fit_transform(a)
+    #    return dist
 
     # ---------------------------------------------------------
     # Calcular a probabilidade a priori de haver paradas
     # ---------------------------------------------------------
-    def calculate_apriori_bus_stop(self, line_code, vehicle, events):
-        a = events.query("line_code == @line_code and vehicle == @vehicle")
-        if a.empty:
-            return np.nan
-        a = a.groupby(by = ["line_code", "vehicle", "status"]).agg({"id": "count"}).reset_index()
-        a["%"] = a["id"] / a.groupby(by = ["line_code", "vehicle"])["id"].transform("sum")
-        a = a.query("status == 'STOPPED'")["%"]
-        if (a.empty):
-            return 0
-        return a.iloc[0]
+    #def calculate_apriori_bus_stop(self, line_code, vehicle, events):
+    #    a = events.query("line_code == @line_code and vehicle == @vehicle")
+    #    if a.empty:
+    #        return np.nan
+    #    a = a.groupby(by = ["line_code", "vehicle", "status"]).agg({"id": "count"}).reset_index()
+    #    a["%"] = a["id"] / a.groupby(by = ["line_code", "vehicle"])["id"].transform("sum")
+    #    a = a.query("status == 'STOPPED'")["%"]
+    #    if (a.empty):
+    #        return 0
+    #    return a.iloc[0]
 
     # ---------------------------------------------------------
     # Estimar o intervalo de tempo para a próxima parada
     # ---------------------------------------------------------
-    def estimate_next_delta_t(self, next_stop_delta_s, speed_pdf, waiting_time_pdf, apriori_bus_stop, status = None):
-        if status == "STOPPED":
-            b = 1
-        else:
-            b = binomial(1, apriori_bus_stop)
-        while True:
-            try:
-                return pd.to_timedelta(3.6 * next_stop_delta_s / speed_pdf.generate(1)[0] + b * waiting_time_pdf.generate(1)[0], unit = 's')
-            except Exception as e:
-                print(traceback.format_exc())        
+    #def estimate_next_delta_t(self, next_stop_delta_s, speed_pdf, waiting_time_pdf, apriori_bus_stop, status = None):
+    #    if status == "STOPPED":
+    #        b = 1
+    #    else:
+    #        b = binomial(1, apriori_bus_stop)
+    #    while True:
+    #        try:
+    #            return pd.to_timedelta(3.6 * next_stop_delta_s / speed_pdf.generate(1)[0] + b * waiting_time_pdf.generate(1)[0], unit = 's')
+    #        except Exception as e:
+    #            print(traceback.format_exc())        
 
     # ---------------------------------------------------------
     # Procurar o itinerário do ônibus (sentido da rota)
@@ -197,7 +197,7 @@ class Processor:
             events["next_stop_seq"] = np.where((events["line_code"] == events["line_code"].shift(-1)) & (events["itinerary_id"] == events["itinerary_id"].shift(-1)) & (events["vehicle"] == events["vehicle"].shift(-1)), events["seq"].shift(-1), np.nan)
             events["next_event_timestamp"] = np.where((events["line_code"] == events["line_code"].shift(-1)) & (events["itinerary_id"] == events["itinerary_id"].shift(-1)) & (events["vehicle"] == events["vehicle"].shift(-1)), events["event_timestamp"].shift(-1), np.datetime64('NaT'))
             events["lost_positions"] = np.where(events["next_stop_id"].isna() == False, events["next_stop_seq"] - events["seq"] - 1, np.nan)
-            
+
             i = i + 1
             if (len(events.query("lost_positions == @n")) == 0 or i > max_iter):
                 break
@@ -209,8 +209,8 @@ class Processor:
             aux = pd.concat([aux, events.query("lost_positions == @n")])
             #aux["last_name_norm"] = aux["name_norm"]
             aux["last_eventtimestamp"] = aux["event_timestamp"]
-            aux["status"] = np.where(binomial(1, aux["apriori_bus_stop"]) == 1, "STOPPED", "MOVING")
-            aux["estimated_next_delta_t"] = aux.apply(lambda row: self.estimate_next_delta_t(row["next_stop_delta_s"], row["speed_pdf"], row["waiting_time_pdf"], row["apriori_bus_stop"], row["status"]), axis = 1)
+            #aux["status"] = np.where(binomial(1, aux["apriori_bus_stop"]) == 1, "STOPPED", "MOVING")
+            aux["estimated_next_delta_t"] = aux.apply(lambda row: (row["next_event_timestamp"] - row["last_eventtimestamp"]) / (n + 1), axis = 1) #aux.apply(lambda row: self.estimate_next_delta_t(row["next_event_timestamp"], row["lost_positions"]), axis = 1)
             aux["event_timestamp"] = aux.apply(lambda row: row["last_eventtimestamp"] + row["estimated_next_delta_t"], axis = 1)
             aux["last_id"] = aux["id"]
             aux["id"] = aux["next_stop_id"]
@@ -237,7 +237,7 @@ class Processor:
         self.linhas = self.bus_stops["line_code"].drop_duplicates()
         linhas_processadas = []
         if os.path.exists(FILE_ETL_EVENT):
-            events = pd.read_csv(FILE_ETL_EVENT, header = 0, names = ["line_code", "vehicle", "id", "status", "itinerary_id", "event_timestamp", "seq"], dtype = {"line_code": np.str})
+            events = pd.read_csv(FILE_ETL_EVENT, header = 0, names = ["line_code", "vehicle", "id", "itinerary_id", "event_timestamp", "seq"], dtype = {"line_code": np.str})
             linhas_processadas = events["line_code"].astype(str).drop_duplicates().tolist()
         linhas_nao_processadas = list(set(self.linhas) - set(linhas_processadas))
         self.c = len(linhas_processadas)
@@ -284,13 +284,13 @@ class Processor:
                 # Computar passagem de ônibus próximo aos pontos (Eventos)
                 # ------------------------------------------------------------------
                 time_window = 10
-                events = aux.query("distance <= 50")[{"line_code", "vehicle", "event_timestamp", "id", "status", "latitude", "longitude"}]
+                events = aux.query("distance <= 50")[{"line_code", "vehicle", "event_timestamp", "id", "latitude", "longitude"}]
                 events["year"] = events["event_timestamp"].dt.year
                 events["month"] = events["event_timestamp"].dt.month
                 events["day"] = events["event_timestamp"].dt.day
                 events["hour"] = events["event_timestamp"].dt.hour
                 events["minute"] = time_window * events["event_timestamp"].dt.minute.floordiv(time_window)
-                events = events.groupby(by = ["line_code", "vehicle", "id", "year", "month", "day", "hour", "minute", "latitude", "longitude"]).agg({"event_timestamp": "mean", "status": "max"}).reset_index()
+                events = events.groupby(by = ["line_code", "vehicle", "id", "year", "month", "day", "hour", "minute", "latitude", "longitude"]).agg({"event_timestamp": "mean"}).reset_index()
                 events.drop(["year", "month", "day", "hour", "minute"], axis = 1, inplace = True)
                 events = events.sort_values(by = ["line_code", "vehicle", "event_timestamp"])
                 events["last_1_id"] = np.where((events["line_code"] == events["line_code"].shift(1)) & (events["vehicle"] == events["vehicle"].shift(1)), events["id"].shift(1), np.nan)
@@ -314,46 +314,46 @@ class Processor:
                 # ------------------------------------------------------------------
                 # Computar passagem de ônibus próximo aos pontos (Tempo de Espera)
                 # ------------------------------------------------------------------
-                waiting_time = aux.query("distance <= 250")[{"line_code", "vehicle", "event_timestamp", "id", "status"}]
-                waiting_time["year"] = waiting_time["event_timestamp"].dt.year
-                waiting_time["month"] = waiting_time["event_timestamp"].dt.month
-                waiting_time["day"] = waiting_time["event_timestamp"].dt.day
-                waiting_time["hour"] = waiting_time["event_timestamp"].dt.hour
-                waiting_time["minute"] = time_window * waiting_time["event_timestamp"].dt.minute.floordiv(time_window)
-                waiting_time = waiting_time.groupby(by = ["line_code", "vehicle", "id", "year", "month", "day", "hour", "minute", "status"]).agg({"event_timestamp": "mean"}).reset_index()
-                waiting_time.drop(["year", "month", "day", "hour", "minute"], axis = 1, inplace = True)
-                waiting_time.sort_values(by = ["line_code", "vehicle", "event_timestamp"], inplace = True)
-                waiting_time["last_1_id"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(1)), waiting_time["id"].shift(1), np.nan)
-                waiting_time["last_2_id"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(2)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(2)), waiting_time["id"].shift(2), np.nan)
-                waiting_time["itinerary_id"] = waiting_time.apply(lambda row: self.search_itinerary(row["line_code"], row["id"], row["last_1_id"], row["last_2_id"]), axis = 1)
-                waiting_time["itinerary_id"] = waiting_time["itinerary_id"].fillna(method = "bfill")
+                #waiting_time = aux.query("distance <= 250")[{"line_code", "vehicle", "event_timestamp", "id", "status"}]
+                #waiting_time["year"] = waiting_time["event_timestamp"].dt.year
+                #waiting_time["month"] = waiting_time["event_timestamp"].dt.month
+                #waiting_time["day"] = waiting_time["event_timestamp"].dt.day
+                #waiting_time["hour"] = waiting_time["event_timestamp"].dt.hour
+                #waiting_time["minute"] = time_window * waiting_time["event_timestamp"].dt.minute.floordiv(time_window)
+                #waiting_time = waiting_time.groupby(by = ["line_code", "vehicle", "id", "year", "month", "day", "hour", "minute", "status"]).agg({"event_timestamp": "mean"}).reset_index()
+                #waiting_time.drop(["year", "month", "day", "hour", "minute"], axis = 1, inplace = True)
+                #waiting_time.sort_values(by = ["line_code", "vehicle", "event_timestamp"], inplace = True)
+                #waiting_time["last_1_id"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(1)), waiting_time["id"].shift(1), np.nan)
+                #waiting_time["last_2_id"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(2)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(2)), waiting_time["id"].shift(2), np.nan)
+                #waiting_time["itinerary_id"] = waiting_time.apply(lambda row: self.search_itinerary(row["line_code"], row["id"], row["last_1_id"], row["last_2_id"]), axis = 1)
+                #waiting_time["itinerary_id"] = waiting_time["itinerary_id"].fillna(method = "bfill")
                 
                 # ---------------------------------------------------------
                 # Passar filtro de itinerario para atenuar ruído
                 # ---------------------------------------------------------
-                itinerary_probability = waiting_time.groupby(by = ["line_code", "vehicle", "itinerary_id"]).agg({"id": "count"}).reset_index()
-                itinerary_probability["%"] = itinerary_probability["id"] / itinerary_probability.groupby(by = ["line_code", "vehicle"])["id"].transform("sum")
+                #itinerary_probability = waiting_time.groupby(by = ["line_code", "vehicle", "itinerary_id"]).agg({"id": "count"}).reset_index()
+                #itinerary_probability["%"] = itinerary_probability["id"] / itinerary_probability.groupby(by = ["line_code", "vehicle"])["id"].transform("sum")
                 
-                waiting_time["itinerary_id"] = waiting_time.apply(lambda row: self.filter_itinerary(row["line_code"], row["vehicle"], row["itinerary_id"], ITINERARY_THRESHOLD, itinerary_probability), axis = 1)            
-                waiting_time = pd.merge(waiting_time, self.bus_stops[{"line_code", "id", "itinerary_id", "seq", "max_seq"}], on = ["line_code", "id", "itinerary_id"], how = "left")
-                waiting_time.query("not (itinerary_id.notnull() and seq.isnull())", inplace = True, engine = "python")
-                waiting_time["last_id"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(1)), waiting_time["id"].shift(1), np.nan)
-                waiting_time["last_status"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(1)), waiting_time["status"].shift(1), np.nan)
-                waiting_time["last_eventtimestamp"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(1)), waiting_time["event_timestamp"].shift(1), np.datetime64('NaT'))
-                waiting_time["next_id"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(-1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(-1)), waiting_time["id"].shift(-1), np.nan)
-                waiting_time["next_status"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(-1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(-1)), waiting_time["status"].shift(-1), np.nan)
-                waiting_time["next_eventtimestamp"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(-1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(-1)), waiting_time["event_timestamp"].shift(-1), np.datetime64('NaT'))
-                waiting_time["delta_t"] = (waiting_time["next_eventtimestamp"] - waiting_time["last_eventtimestamp"]).astype('timedelta64[s]')
+                #waiting_time["itinerary_id"] = waiting_time.apply(lambda row: self.filter_itinerary(row["line_code"], row["vehicle"], row["itinerary_id"], ITINERARY_THRESHOLD, itinerary_probability), axis = 1)            
+                #waiting_time = pd.merge(waiting_time, self.bus_stops[{"line_code", "id", "itinerary_id", "seq", "max_seq"}], on = ["line_code", "id", "itinerary_id"], how = "left")
+                #waiting_time.query("not (itinerary_id.notnull() and seq.isnull())", inplace = True, engine = "python")
+                #waiting_time["last_id"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(1)), waiting_time["id"].shift(1), np.nan)
+                #waiting_time["last_status"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(1)), waiting_time["status"].shift(1), np.nan)
+                #waiting_time["last_eventtimestamp"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(1)), waiting_time["event_timestamp"].shift(1), np.datetime64('NaT'))
+                #waiting_time["next_id"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(-1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(-1)), waiting_time["id"].shift(-1), np.nan)
+                #waiting_time["next_status"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(-1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(-1)), waiting_time["status"].shift(-1), np.nan)
+                #waiting_time["next_eventtimestamp"] = np.where((waiting_time["line_code"] == waiting_time["line_code"].shift(-1)) & (waiting_time["vehicle"] == waiting_time["vehicle"].shift(-1)), waiting_time["event_timestamp"].shift(-1), np.datetime64('NaT'))
+                #waiting_time["delta_t"] = (waiting_time["next_eventtimestamp"] - waiting_time["last_eventtimestamp"]).astype('timedelta64[s]')
 
                 # ---------------------------------------------------------
                 # Estimar os parâmetros das variáveis aleatórias
                 # ---------------------------------------------------------
-                vehicle_pdfs = self.vehicles.query("line_code == @linha")[{"line_code", "vehicle"}].drop_duplicates()
-                vehicle_pdfs["speed_pdf"] = vehicle_pdfs.apply(lambda row: self.fit_speed_pdf(row["line_code"], row["vehicle"]), axis = 1)
-                vehicle_pdfs["waiting_time_pdf"] = vehicle_pdfs.apply(lambda row: self.fit_waiting_time_pdf(row["line_code"], row["vehicle"], waiting_time), axis = 1)
-                vehicle_pdfs["apriori_bus_stop"] = vehicle_pdfs.apply(lambda row: self.calculate_apriori_bus_stop(row["line_code"], row["vehicle"], events), axis = 1)
-                events = pd.merge(events, vehicle_pdfs[{"line_code", "vehicle", "speed_pdf", "waiting_time_pdf", "apriori_bus_stop"}], on = ["line_code", "vehicle"], how = "inner")
-                events.query("speed_pdf.notna() & waiting_time_pdf.notna()", inplace = True)
+                #vehicle_pdfs = self.vehicles.query("line_code == @linha")[{"line_code", "vehicle"}].drop_duplicates()
+                #vehicle_pdfs["speed_pdf"] = vehicle_pdfs.apply(lambda row: self.fit_speed_pdf(row["line_code"], row["vehicle"]), axis = 1)
+                #vehicle_pdfs["waiting_time_pdf"] = vehicle_pdfs.apply(lambda row: self.fit_waiting_time_pdf(row["line_code"], row["vehicle"], waiting_time), axis = 1)
+                #vehicle_pdfs["apriori_bus_stop"] = vehicle_pdfs.apply(lambda row: self.calculate_apriori_bus_stop(row["line_code"], row["vehicle"], events), axis = 1)
+                #events = pd.merge(events, vehicle_pdfs[{"line_code", "vehicle", "speed_pdf", "waiting_time_pdf", "apriori_bus_stop"}], on = ["line_code", "vehicle"], how = "inner")
+                #events.query("speed_pdf.notna() & waiting_time_pdf.notna()", inplace = True)
 
                 # ---------------------------------------------------------
                 # Reordenar logs válidos
@@ -372,17 +372,20 @@ class Processor:
                 # ---------------------------------------------------------
                 # Estimar o timestamp da próxima parada
                 # ---------------------------------------------------------
-                events["estimated_next_delta_t"] = events.apply(lambda row: self.estimate_next_delta_t(row["next_stop_delta_s"], row["speed_pdf"], row["waiting_time_pdf"], row["apriori_bus_stop"]), axis = 1)
-                events["estimated_next_eventtimestamp"] = events.apply(lambda row: row["event_timestamp"] + row["estimated_next_delta_t"], axis = 1)
+                #events["estimated_next_delta_t"] = events.apply(lambda row: self.estimate_next_delta_t(row["next_stop_delta_s"], row["speed_pdf"], row["waiting_time_pdf"], row["apriori_bus_stop"]), axis = 1)
+                #events["estimated_next_eventtimestamp"] = events.apply(lambda row: row["event_timestamp"] + row["estimated_next_delta_t"], axis = 1)
 
-                events["generated"] = False
+                events["generated"] = False                
+                events = self.recover_data(4, 100, events)
+                events = self.recover_data(3, 100, events)
+                events = self.recover_data(2, 100, events)
                 events = self.recover_data(1, 100, events)
                 events["last_stop_seq"] = np.where((events["line_code"] == events["line_code"].shift(1)) & (events["vehicle"] == events["vehicle"].shift(1)), events["seq"].shift(1), np.nan)
                 #events.query("seq < next_stop_seq", inplace = True)
                 events.query("seq == last_stop_seq + 1 or next_stop_seq == seq + 1 or seq == 0", inplace = True)
                 
                 # ---------------------------
-                # Decomentar para testes
+                # Descomentar para testes
                 # ---------------------------
                 events.to_csv("csv/events_finished_{0}.csv".format(linha))         
 
@@ -390,7 +393,7 @@ class Processor:
                 # Selecionar campos utilizados no ETL e exportar
                 # ---------------------------------------------------------        
                 with self._lock:
-                    events.to_csv(FILE_ETL_EVENT, header = False, columns = ["line_code", "vehicle", "id", "status", "itinerary_id", "event_timestamp", "seq"], index = False, mode = "a")
+                    events.to_csv(FILE_ETL_EVENT, header = False, columns = ["line_code", "vehicle", "id", "itinerary_id", "event_timestamp", "seq"], index = False, mode = "a")
                     self.c = self.c + 1
                     print("Linha '{0}' processada com sucesso! [{1} de {2} ({3:.2f}%)]".format(linha, self.c, len(self.linhas), 100 * self.c / len(self.linhas)))                
                 success = True
