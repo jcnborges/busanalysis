@@ -5,8 +5,8 @@ import threading
 import time
 import traceback
 from haversine import haversine, Unit
-from distfit import distfit
 from numpy.random import binomial
+from os.path import join
 
 # ---------------------------------------------------------
 # Declaração de constantes
@@ -29,9 +29,19 @@ class Processor:
         # Recuperar os data frames iniciais (caso existam)
         # ---------------------------------------------------------
         
-        if (os.path.exists(FILE_BUS_STOPS) and os.path.exists(FILE_VEHICLES)):
-            self.bus_stops = pd.read_csv(FILE_BUS_STOPS, dtype = {"line_code": np.str})
-            self.vehicles = pd.read_csv(FILE_VEHICLES, dtype = {"line_code": np.str}, parse_dates = ["event_timestamp"])
+        self.base_dir = base_date.strftime("%Y-%m-%d")
+        self.file_bus_stops = join(self.base_dir, FILE_BUS_STOPS)
+        self.file_vehicles = join(self.base_dir, FILE_VEHICLES)
+        self.file_etl_itinerary = join(self.base_dir, FILE_ETL_ITINERARY)
+        self.file_etl_event = join(self.base_dir, FILE_ETL_EVENT)
+        self.file_error = join(self.base_dir, FILE_ERROR)
+
+        if (not os.path.exists(self.base_dir)):
+            os.mkdir(self.base_dir)
+
+        if (os.path.exists(self.file_bus_stops) and os.path.exists(self.file_vehicles)):
+            self.bus_stops = pd.read_csv(self.file_bus_stops, dtype = {"line_code": np.str})
+            self.vehicles = pd.read_csv(self.file_vehicles, dtype = {"line_code": np.str}, parse_dates = ["event_timestamp"])
         else:
             self.vehicles = vehicles
             self.bus_stops = bus_stops
@@ -63,21 +73,21 @@ class Processor:
             # ---------------------------------------------------------
             # Gravar os data frames iniciais
             # ---------------------------------------------------------
-            self.bus_stops.to_csv(FILE_BUS_STOPS, index = False)
-            self.vehicles.to_csv(FILE_VEHICLES, index = False)
+            self.bus_stops.to_csv(self.file_bus_stops, index = False)
+            self.vehicles.to_csv(self.file_vehicles, index = False)
 
             # ---------------------------------------------------------
             # Remover arquivos de saída se existirem
             # ---------------------------------------------------------
-            if os.path.exists(FILE_ETL_ITINERARY):
-                os.remove(FILE_ETL_ITINERARY)
-            if os.path.exists(FILE_ETL_EVENT):    
-                os.remove(FILE_ETL_EVENT)
+            if os.path.exists(self.file_etl_itinerary):
+                os.remove(self.file_etl_itinerary)
+            if os.path.exists(self.file_etl_event):    
+                os.remove(self.file_etl_event)
 
             # ---------------------------------------------------------
             # Selecionar campos utilizados no ETL e exportar
             # ---------------------------------------------------------         
-            self.bus_stops.to_csv(FILE_ETL_ITINERARY, header = True, columns = ["line_code", "id", "name", "latitude", "longitude", "type", "itinerary_id", "line_way", "next_stop_id", "next_stop_delta_s", "seq"], index = False)
+            self.bus_stops.to_csv(self.file_etl_itinerary, header = True, columns = ["line_code", "id", "name", "latitude", "longitude", "type", "itinerary_id", "line_way", "next_stop_id", "next_stop_delta_s", "seq"], index = False)
 
     # ---------------------------------------------------------
     # Procurar o itinerário do ônibus (sentido da rota)
@@ -166,8 +176,8 @@ class Processor:
     def process_all_lines(self, n_threads):
         self.linhas = self.bus_stops["line_code"].drop_duplicates()
         linhas_processadas = []
-        if os.path.exists(FILE_ETL_EVENT):
-            events = pd.read_csv(FILE_ETL_EVENT, header = 0, names = ["line_code", "vehicle", "id", "itinerary_id", "event_timestamp", "seq"], dtype = {"line_code": np.str})
+        if os.path.exists(self.file_etl_event):
+            events = pd.read_csv(self.file_etl_event, header = 0, names = ["line_code", "vehicle", "id", "itinerary_id", "event_timestamp", "seq"], dtype = {"line_code": np.str})
             linhas_processadas = events["line_code"].astype(str).drop_duplicates().tolist()
         linhas_nao_processadas = list(set(self.linhas) - set(linhas_processadas))
         self.c = len(linhas_processadas)
@@ -194,12 +204,6 @@ class Processor:
                 # -----------------------------------------------------------------------------------------
                 dim_bus_stops = self.bus_stops.groupby(by = ["id"]).agg({"latitude": "mean", "longitude": "mean"}).reset_index()
                 aux = self.vehicles.query("line_code == @linha")
-
-                # Filtro de horário para simulação
-                aux["event_time"] = aux["event_timestamp"].dt.strftime('%H:%M:%S')
-                #aux = aux.query("not (event_time >= '06:15' and event_time <= '06:16')")
-                #aux = aux.query("not (event_time >= '06:17' and event_time <= '06:19')")
-                #aux = aux.query("not (event_time >= '06:26' and event_time <= '06:28')")
 
                 if (aux.empty):
                     print("Não há logs de veículos... Encerrando o processamento da linha!")
@@ -260,8 +264,9 @@ class Processor:
                 # ---------------------------
                 # Descomentar para testes
                 # --------------------------
-                events = self.recover_data(0, events) # somente para marcar lost_position
-                events.to_csv("csv_sem_interpolacao/events_finished_{0}.csv".format(linha))
+                #events["generated"] = False
+                #events = self.recover_data(0, events) # somente para marcar lost_position
+                #events.to_csv("csv_sem_interpolacao/events_finished_{0}.csv".format(linha))
 
                 events = self.recover_data(7, events) # no máximo 7 interpolações
                 events["last_stop_seq"] = np.where((events["line_code"] == events["line_code"].shift(1)) & (events["vehicle"] == events["vehicle"].shift(1)), events["seq"].shift(1), np.nan)
@@ -270,19 +275,19 @@ class Processor:
                 # ---------------------------
                 # Descomentar para testes
                 # ---------------------------
-                events.to_csv("csv_com_interpolacao/events_finished_{0}.csv".format(linha))         
+                #events.to_csv("csv_com_interpolacao/events_finished_{0}.csv".format(linha))         
 
                 # ---------------------------------------------------------
                 # Selecionar campos utilizados no ETL e exportar
                 # ---------------------------------------------------------        
                 with self._lock:
-                    events.to_csv(FILE_ETL_EVENT, header = False, columns = ["line_code", "vehicle", "id", "itinerary_id", "event_timestamp", "seq"], index = False, mode = "a")
+                    events.to_csv(self.file_etl_event, header = False, columns = ["line_code", "vehicle", "id", "itinerary_id", "event_timestamp", "seq"], index = False, mode = "a")
                     self.c = self.c + 1
                     print("Linha '{0}' processada com sucesso! [{1} de {2} ({3:.2f}%)]".format(linha, self.c, len(self.linhas), 100 * self.c / len(self.linhas)))                
                 success = True
             except Exception as e:
                 ctentativa = ctentativa + 1
                 with self._lock:
-                    with open(FILE_ERROR, "a") as f:
+                    with open(self.file_error, "a") as f:
                         f.write("Linha: {0} [{1}]\nTraceback:{2}".format(linha, ctentativa, traceback.format_exc()))
                     print(traceback.format_exc())
