@@ -1,5 +1,7 @@
+USE busanalysis_dw;
 TRUNCATE TABLE fat_event;
 TRUNCATE TABLE fat_itinerary;
 SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE dim_bus_stop;
+TRUNCATE TABLE dim_line;
 SET FOREIGN_KEY_CHECKS = 1;

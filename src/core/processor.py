@@ -13,14 +13,16 @@ from os.path import join
 # ---------------------------------------------------------
 FILE_BUS_STOPS = "bus_stops.csv"
 FILE_VEHICLES = "vehicles.csv"
+FILE_LINES = "lines.csv"
 FILE_ETL_ITINERARY = "etl_itinerary.csv"
 FILE_ETL_EVENT = "etl_event.csv"
+FILE_ETL_LINE = "etl_line.csv"
 FILE_ERROR = "error.log"
 ITINERARY_THRESHOLD = 0.8
 
 class Processor:
 
-    def __init__(self, bus_stops, vehicles, base_date):
+    def __init__(self, bus_stops, vehicles, lines, base_date):
         
         self.base_date = base_date
         self._lock = threading.Lock()
@@ -32,19 +34,23 @@ class Processor:
         self.base_dir = base_date.strftime("%Y-%m-%d")
         self.file_bus_stops = join(self.base_dir, FILE_BUS_STOPS)
         self.file_vehicles = join(self.base_dir, FILE_VEHICLES)
+        self.file_lines = join(self.base_dir, FILE_LINES)
         self.file_etl_itinerary = join(self.base_dir, FILE_ETL_ITINERARY)
         self.file_etl_event = join(self.base_dir, FILE_ETL_EVENT)
+        self.FILE_ETL_LINE = join(self.base_dir, FILE_ETL_LINE)
         self.file_error = join(self.base_dir, FILE_ERROR)
 
         if (not os.path.exists(self.base_dir)):
             os.mkdir(self.base_dir)
 
-        if (os.path.exists(self.file_bus_stops) and os.path.exists(self.file_vehicles)):
+        if (os.path.exists(self.file_bus_stops) and os.path.exists(self.file_vehicles) and os.path.exists(self.file_lines)):
             self.bus_stops = pd.read_csv(self.file_bus_stops, dtype = {"line_code": np.str})
             self.vehicles = pd.read_csv(self.file_vehicles, dtype = {"line_code": np.str}, parse_dates = ["event_timestamp"])
+            self.lines = pd.read_csv(self.file_lines, dtype = {"line_code": np.str})
         else:
             self.vehicles = vehicles
             self.bus_stops = bus_stops
+            self.lines = lines
 
             # ---------------------------------------------------------
             # Limpar bus stops
@@ -75,6 +81,7 @@ class Processor:
             # ---------------------------------------------------------
             self.bus_stops.to_csv(self.file_bus_stops, index = False)
             self.vehicles.to_csv(self.file_vehicles, index = False)
+            self.lines.to_csv(self.file_lines, index = False)
 
             # ---------------------------------------------------------
             # Remover arquivos de saída se existirem
@@ -88,6 +95,7 @@ class Processor:
             # Selecionar campos utilizados no ETL e exportar
             # ---------------------------------------------------------         
             self.bus_stops.to_csv(self.file_etl_itinerary, header = True, columns = ["line_code", "id", "name", "latitude", "longitude", "type", "itinerary_id", "line_way", "next_stop_id", "next_stop_delta_s", "seq"], index = False)
+            self.lines.to_csv(self.FILE_ETL_LINE, header = True, columns = ["line_code", "line_name", "service_category", "color"], index = False)
 
     # ---------------------------------------------------------
     # Procurar o itinerário do ônibus (sentido da rota)
