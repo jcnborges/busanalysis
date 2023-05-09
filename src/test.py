@@ -22,7 +22,7 @@ LINES = "/mnt/work/datalake/trusted/lines/year={0}/month={1:02d}/day={2:02d}"
 
 year = 2022
 month = 7
-day = 17
+day = 11
 n_threads = 1
 
 file_bus_stops = BUS_STOPS.format(year, month, day)
@@ -46,4 +46,4 @@ lines = pd.concat(data, ignore_index = True)
 
 p = Processor(bus_stops, vehicles, lines, base_date)
 
-#p.process_line("829", 1)
+p.process_line("654", 1)

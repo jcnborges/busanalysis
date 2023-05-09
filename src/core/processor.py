@@ -147,32 +147,34 @@ class Processor:
             events["next_event_timestamp"] = np.where((events["line_code"] == events["line_code"].shift(-1)) & (events["itinerary_id"] == events["itinerary_id"].shift(-1)) & (events["vehicle"] == events["vehicle"].shift(-1)), events["event_timestamp"].shift(-1), np.datetime64('NaT'))
             events["lost_positions"] = np.where(events["next_stop_id"].isna() == False, events["next_stop_seq"] - events["seq"] - 1, np.nan)
 
-            if (len(events.query("lost_positions == @n")) == 0 or n == 0):
+            if (n == 0):
                 break
+            
+            if (len(events.query("lost_positions == @n")) > 0):
 
-            # ---------------------------------------------------------
-            # Recuperar as paradas perdidas de 1 em 1
-            # ---------------------------------------------------------
-            aux = pd.DataFrame(columns = events.columns)
-            aux = pd.concat([aux, events.query("lost_positions == @n")])
-            aux["last_eventtimestamp"] = aux["event_timestamp"]
-            aux["estimated_next_delta_t"] = aux.apply(lambda row: (row["next_event_timestamp"] - row["last_eventtimestamp"]) / (n + 1), axis = 1) #aux.apply(lambda row: self.estimate_next_delta_t(row["next_event_timestamp"], row["lost_positions"]), axis = 1)
-            aux["event_timestamp"] = aux.apply(lambda row: row["last_eventtimestamp"] + row["estimated_next_delta_t"], axis = 1)
-            aux["last_id"] = aux["id"]
-            aux["id"] = aux["next_stop_id"]
-            aux["generated"] = True
-            aux.drop(["latitude", "longitude", "seq", "next_stop_id", "next_stop_delta_s"], axis = 1, inplace = True)
+                # ---------------------------------------------------------
+                # Recuperar as paradas perdidas de 1 em 1
+                # ---------------------------------------------------------
+                aux = pd.DataFrame(columns = events.columns)
+                aux = pd.concat([aux, events.query("lost_positions == @n")])
+                aux["last_eventtimestamp"] = aux["event_timestamp"]
+                aux["estimated_next_delta_t"] = aux.apply(lambda row: (row["next_event_timestamp"] - row["last_eventtimestamp"]) / (n + 1), axis = 1) #aux.apply(lambda row: self.estimate_next_delta_t(row["next_event_timestamp"], row["lost_positions"]), axis = 1)
+                aux["event_timestamp"] = aux.apply(lambda row: row["last_eventtimestamp"] + row["estimated_next_delta_t"], axis = 1)
+                aux["last_id"] = aux["id"]
+                aux["id"] = aux["next_stop_id"]
+                aux["generated"] = True
+                aux.drop(["latitude", "longitude", "seq", "next_stop_id", "next_stop_delta_s"], axis = 1, inplace = True)
 
-            # --------------------------------------------------------------------------
-            # Validar o timestamp gerado (maior que o anterior e menor que o proximo)
-            # --------------------------------------------------------------------------
-            aux.query("event_timestamp > last_eventtimestamp & event_timestamp < next_event_timestamp", inplace = True)
-            aux = pd.merge(aux, self.bus_stops[{"line_code", "id", "itinerary_id", "seq", "next_stop_id", "next_stop_delta_s", "latitude", "longitude"}], on = ["line_code", "id", "itinerary_id"], how = "inner")            
+                # --------------------------------------------------------------------------
+                # Validar o timestamp gerado (maior que o anterior e menor que o proximo)
+                # --------------------------------------------------------------------------
+                aux.query("event_timestamp > last_eventtimestamp & event_timestamp < next_event_timestamp", inplace = True)
+                aux = pd.merge(aux, self.bus_stops[{"line_code", "id", "itinerary_id", "seq", "next_stop_id", "next_stop_delta_s", "latitude", "longitude"}], on = ["line_code", "id", "itinerary_id"], how = "inner")            
 
-            # ---------------------------------------------------------
-            # Adicionar os registros selecionados
-            # ---------------------------------------------------------
-            events = pd.concat([events, aux], ignore_index = True)
+                # ---------------------------------------------------------
+                # Adicionar os registros selecionados
+                # ---------------------------------------------------------
+                events = pd.concat([events, aux], ignore_index = True)
 
             n = n - 1
 
@@ -269,10 +271,11 @@ class Processor:
                     print("Não há logs válidos de veículos. Encerrando o processamento da linha!")
                     return
 
+                events["generated"] = False
+
                 # ---------------------------
                 # Descomentar para testes
-                # --------------------------
-                #events["generated"] = False
+                # --------------------------                
                 #events = self.recover_data(0, events) # somente para marcar lost_position
                 #events.to_csv("csv_sem_interpolacao/events_finished_{0}.csv".format(linha))
 
