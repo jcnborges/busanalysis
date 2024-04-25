@@ -44,9 +44,9 @@ class Processor:
             os.mkdir(self.base_dir)
 
         if (os.path.exists(self.file_bus_stops) and os.path.exists(self.file_vehicles) and os.path.exists(self.file_lines)):
-            self.bus_stops = pd.read_csv(self.file_bus_stops, dtype = {"line_code": np.str})
-            self.vehicles = pd.read_csv(self.file_vehicles, dtype = {"line_code": np.str}, parse_dates = ["event_timestamp"])
-            self.lines = pd.read_csv(self.file_lines, dtype = {"line_code": np.str})
+            self.bus_stops = pd.read_csv(self.file_bus_stops, dtype = {"line_code": np.str_})
+            self.vehicles = pd.read_csv(self.file_vehicles, dtype = {"line_code": np.str_}, parse_dates = ["event_timestamp"])
+            self.lines = pd.read_csv(self.file_lines, dtype = {"line_code": np.str_})
         else:
             self.vehicles = vehicles
             self.bus_stops = bus_stops
@@ -59,14 +59,14 @@ class Processor:
             self.bus_stops['longitude'] = pd.to_numeric(self.bus_stops['longitude'])
             self.bus_stops['seq'] = pd.to_numeric(self.bus_stops['seq'])
             self.bus_stops.sort_values(by = ["line_code", "itinerary_id", "seq"], inplace = True)
-            self.bus_stops = self.bus_stops[{"itinerary_id", "line_code", "latitude", "longitude", "name", "number", "line_way", "type"}].drop_duplicates()
+            self.bus_stops = self.bus_stops[["itinerary_id", "line_code", "latitude", "longitude", "name", "number", "line_way", "type"]].drop_duplicates()
             self.bus_stops["id"] = pd.to_numeric(self.bus_stops["number"]) #self.bus_stops["name_norm"].astype('category').cat.codes
             self.bus_stops["next_stop_id"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["id"].shift(-1), None)
             self.bus_stops["next_stop_id"] = self.bus_stops["next_stop_id"].astype('Int64')
             self.bus_stops["next_stop_latitude"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["latitude"].shift(-1), np.nan)
             self.bus_stops["next_stop_longitude"] = np.where((self.bus_stops["line_code"] == self.bus_stops["line_code"].shift(-1)) & (self.bus_stops["itinerary_id"] == self.bus_stops["itinerary_id"].shift(-1)), self.bus_stops["longitude"].shift(-1), np.nan)
             self.bus_stops["next_stop_delta_s"] = self.bus_stops.apply(lambda row: haversine((row["latitude"], row["longitude"]), (row["next_stop_latitude"], row["next_stop_longitude"]), unit = Unit.METERS), axis = 1)
-            self.bus_stops = self.bus_stops.query("id != next_stop_id or next_stop_id.isnull()")
+            self.bus_stops = self.bus_stops.query("id != next_stop_id or next_stop_id.isnull()", engine='python')
             self.bus_stops["seq"] = self.bus_stops.groupby(["itinerary_id", "line_code"]).cumcount()
             self.bus_stops["max_seq"] = self.bus_stops.groupby(["itinerary_id", "line_code"])["seq"].transform(max)
 
@@ -169,7 +169,7 @@ class Processor:
                 # Validar o timestamp gerado (maior que o anterior e menor que o proximo)
                 # --------------------------------------------------------------------------
                 aux.query("event_timestamp > last_eventtimestamp & event_timestamp < next_event_timestamp", inplace = True)
-                aux = pd.merge(aux, self.bus_stops[{"line_code", "id", "itinerary_id", "seq", "next_stop_id", "next_stop_delta_s", "latitude", "longitude"}], on = ["line_code", "id", "itinerary_id"], how = "inner")            
+                aux = pd.merge(aux, self.bus_stops[["line_code", "id", "itinerary_id", "seq", "next_stop_id", "next_stop_delta_s", "latitude", "longitude"]], on = ["line_code", "id", "itinerary_id"], how = "inner")            
 
                 # ---------------------------------------------------------
                 # Adicionar os registros selecionados
@@ -213,7 +213,7 @@ class Processor:
                 # Cruzar a posição do ônibus com a localização dos pontos de ônibus e calcular a distância
                 # -----------------------------------------------------------------------------------------
                 dim_bus_stops = self.bus_stops.groupby(by = ["id"]).agg({"latitude": "mean", "longitude": "mean"}).reset_index()
-                aux = self.vehicles.query("line_code == @linha")
+                aux = self.vehicles.query("line_code == @linha").copy()
 
                 if (aux.empty):
                     print("Não há logs de veículos... Encerrando o processamento da linha!")
@@ -231,7 +231,7 @@ class Processor:
                 # Computar passagem de ônibus próximo aos pontos (Eventos)
                 # ------------------------------------------------------------------
                 time_window = 10
-                events = aux.query("distance <= 50")[{"line_code", "vehicle", "event_timestamp", "id", "latitude", "longitude"}]
+                events = aux.query("distance <= 50")[["line_code", "vehicle", "event_timestamp", "id", "latitude", "longitude"]]
                 events["year"] = events["event_timestamp"].dt.year
                 events["month"] = events["event_timestamp"].dt.month
                 events["day"] = events["event_timestamp"].dt.day
@@ -254,7 +254,7 @@ class Processor:
                 counts, bins = np.histogram(itinerary_probability["%"])
                 
                 events["itinerary_id"] = events.apply(lambda row: self.filter_itinerary(row["line_code"], row["vehicle"], row["itinerary_id"], ITINERARY_THRESHOLD, itinerary_probability), axis = 1)                        
-                events = pd.merge(events, self.bus_stops[{"line_code", "id", "itinerary_id", "seq", "max_seq"}], on = ["line_code", "id", "itinerary_id"], how = "left")         
+                events = pd.merge(events, self.bus_stops[["line_code", "id", "itinerary_id", "seq", "max_seq"]], on = ["line_code", "id", "itinerary_id"], how = "left")         
                 events.query("not (itinerary_id.notnull() and seq.isnull())", inplace = True, engine = "python")
                 events.drop(["seq", "max_seq", "last_1_id", "last_2_id"], axis = 1, inplace = True)
 
@@ -265,7 +265,7 @@ class Processor:
                 events["last_eventtimestamp"] = np.where((events["line_code"] == events["line_code"].shift(1)) & (events["vehicle"] == events["vehicle"].shift(1)), events["event_timestamp"].shift(1), np.datetime64('NaT'))
                 events["last_id"] = np.where((events["line_code"] == events["line_code"].shift(1)) & (events["vehicle"] == events["vehicle"].shift(1)), events["id"].shift(1), np.nan)                
                 events.query("id != last_id", inplace = True)
-                events = pd.merge(events, self.bus_stops[{"line_code", "id", "itinerary_id", "seq", "next_stop_id", "next_stop_delta_s"}], on = ["line_code", "id", "itinerary_id"], how = "left")
+                events = pd.merge(events, self.bus_stops[["line_code", "id", "itinerary_id", "seq", "next_stop_id", "next_stop_delta_s"]], on = ["line_code", "id", "itinerary_id"], how = "left")
 
                 if (events.empty):
                     print("Não há logs válidos de veículos. Encerrando o processamento da linha!")
