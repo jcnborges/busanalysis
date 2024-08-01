@@ -1,0 +1,16 @@
+services:
+  jupyterlab:
+    network_mode: bridge
+    container_name: busanalysis-jupyterlab
+    restart: always
+    user: root
+    build: .
+    image: utfpr/jupyterlab:latest
+    working_dir: /opt/busanalysis/
+    ports:
+      - 8085:8085
+      - 4040:4040
+    volumes:
+      - .:/opt/busanalysis/
+      - /mnt/work/datalake:/data/
+      - /mnt/work/database:/database/
