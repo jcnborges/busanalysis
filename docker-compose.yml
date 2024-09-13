@@ -1,0 +1,13 @@
+version: '3.1'
+
+services:
+  jupyterlab:
+    container_name: busanalysis
+    restart: always
+    user: root
+    build: .
+    working_dir: /opt/busanalysis/
+    ports:
+      - 8086:8085
+    volumes:
+      - .:/opt/busanalysis/
