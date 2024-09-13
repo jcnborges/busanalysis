@@ -1,0 +1,8 @@
+*.csv
+*.parquet
+.ipynb_checkpoints
+.gitattributes
+maps/
+*.png
+*.html
+*__pycache__*
