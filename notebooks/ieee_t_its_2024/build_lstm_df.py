@@ -1,16 +1,13 @@
 import pandas as pd
 
-day = 11
 tw = 5
 cd = [30, 1200]
-ws = 1
 density_choices = ['Low', 'Moderate', 'High']
 df_cluster = pd.read_parquet('df_cluster.parquet')
 agg_cluster =  pd.read_parquet('agg_cluster.parquet')
 df_bus_availability = pd.read_parquet('df_bus_availability.parquet')
 positive_edges = pd.read_parquet('positive_edges.parquet')
 cluster_high = list(agg_cluster.query(f"density == '{density_choices[2]}'").cluster)
-df_cluster.query(f"cluster == {cluster_high}").head()
 
 def build_dataset(group_id):
     edge_info = df_cluster.query(f"group_id == {group_id}")
@@ -39,29 +36,33 @@ def build_dataset(group_id):
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-def build_dataset_thread(group_ids, lstm_dfs):
+def build_dataset_thread(group_ids, chunk_num):
     """Builds the dataset for a list of group IDs, appends them to the lstm_dfs list.
     """
     c = 0
+    lstm_dfs = []
     for group_id in group_ids:
-        lstm_dfs.append(build_dataset(group_id))
+        try:
+            lstm_dfs.append(build_dataset(group_id))
+        except Exception as ex:
+            print(f"[{chunk_num}] {ex}")
         c += 1
         if c % 100 == 0:
-            print(f"[{threading.current_thread().name}] {c} / {len(group_ids)}")
+            print(f"[{chunk_num}] {c} / {len(group_ids)}")
+        
+    # lstm_dfs will contain the datasets for each group
+    df = pd.concat(lstm_dfs)
+    df = df.pivot(index = ['group_id', 'cluster', 'time_window'], columns = 'series', values = 'value').reset_index()
+    df.filter(['group_id', 'cluster', 'time_window', 'minor', 'bigger', 'connection']).to_parquet(f"chunks/chunk_{chunk_num}.parquet", index = None)            
 
-lstm_dfs = []
 group_ids = list(df_cluster.query(f"cluster == {cluster_high}").group_id)
 
-# Divide group_ids into chunks of 1,000
-chunk_size = 1000
+# Divide group_ids into chunks of 10,000
+chunk_size = 10000
 group_id_chunks = [group_ids[i:i + chunk_size] for i in range(0, len(group_ids), chunk_size)]
 
 with ThreadPoolExecutor(max_workers=8) as executor:
+    chunk_num = 0
     for chunk in group_id_chunks:
-        executor.submit(build_dataset_thread, chunk, lstm_dfs)
-
-# lstm_dfs will contain the datasets for each group
-
-df = pd.concat(lstm_dfs)
-df = df.pivot(index = ['group_id', 'cluster', 'time_window'], columns = 'series', values = 'value').reset_index()
-df.filter(['group_id', 'cluster', 'time_window', 'minor', 'bigger', 'connection']).to_parquet('lstm_df.parquet', index = None)
+        executor.submit(build_dataset_thread, chunk, chunk_num)
+        chunk_num = chunk_num + 1
