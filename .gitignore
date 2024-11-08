@@ -6,3 +6,4 @@ maps/
 *.png
 *.html
 *__pycache__*
+*.gexf
