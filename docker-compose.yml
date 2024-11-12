@@ -1,9 +1,14 @@
 version: '3.1'
 
+networks:
+  default:
+    name: urbs-network
+    external: true
+
 services:
   jupyterlab:
     container_name: busanalysis
-    restart: always
+    restart: unless-stopped
     user: root
     build: .
     working_dir: /opt/busanalysis/
@@ -11,3 +16,11 @@ services:
       - 8086:8085
     volumes:
       - .:/opt/busanalysis/
+    networks:
+      - default
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: 123456789
+      MYSQL_DATABASE: busanalysis_dw     
